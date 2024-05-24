@@ -1,0 +1,168 @@
+package main
+
+import (
+	"bufio"
+	"fmt"
+	"net"
+	"os"
+	"strconv"
+	"strings"
+	"sync"
+)
+
+func main() {
+	//Kullanıcıdan ip aralığı alma
+	fmt.Print("Taranacak IP Aralığını Giriniz/(Başlangıç ve Bitiş IP Aralığını '-' ile Ayırınız): ")
+	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Scan()
+	ipRange := scanner.Text()
+
+	//IP aralığını '-' ile ayırma
+	rangeParts := strings.Split(ipRange, "-")
+	if len(rangeParts) != 2 {
+		fmt.Println("Geçersiz IP aralığı!")
+		return
+	}
+
+	startIP := rangeParts[0]
+	endIP := rangeParts[1]
+
+	fmt.Printf("Başlangıç IP: %s\nBitiş IP: %s\n", startIP, endIP)
+	/*
+		startIP := "192.168.1.1"
+		endIP := "192.168.1.10"*/
+
+	//ip aralığındaki tüm ip adresleri tara
+	var wg sync.WaitGroup
+	for ip := startIP; ip <= endIP; ip = getNextIP(ip) {
+		wg.Add(1)
+		go func(ip string) {
+			defer wg.Done()
+			if isIPActive(ip) {
+				fmt.Printf("Aktif IP: %s\n", ip)
+			}
+		}(ip)
+	}
+	wg.Wait()
+}
+
+func getNextIP(ip string) string {
+	oktet := strings.Split(ip, ".")
+	sonOktet, _ := strconv.Atoi(oktet[3])
+	sonOktet++
+	oktet[3] = strconv.Itoa(sonOktet)
+	return strings.Join(oktet, ".")
+}
+
+func isIPActive(ip string) bool {
+	_, err := net.Dial("ip4:icmp", ip)
+	return err == nil
+}
+
+
+
+
+------------------------
+package main
+
+import (
+	"database/sql"
+	"fmt"
+	"log"
+	"net/http"
+	"text/template"
+)
+
+var (
+	templates = template.Must(template.ParseFiles("index.html", "register.html", "login.html"))
+	db        *sql.DB
+)
+
+func main() {
+	var err error
+	db, err = sql.Open("sqlite3", "./users.db")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+
+	// handlefunc ile URL yolunu ve ona bağlı işlevi velirliyoruz.
+	http.HandleFunc("/", homeHandler)
+	http.HandleFunc("/register", registerHandler)
+	http.HandleFunc("/login", loginHandler)
+
+	//Sunucuyu başlatıyoruz
+	fmt.Println("Sunucu başlatılıyor....\nhttp://localhost:8080")
+	http.ListenAndServe(":8080", nil)
+}
+
+func homeHandler(w http.ResponseWriter, r *http.Request) {
+	//fmt.Fprintf(w, "Ana Sayfa")
+	if err := templates.ExecuteTemplate(w, "index.html", nil); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+func createTable() {
+	users := `CREATE TABLE IF NOT EXISTS users (
+        "id" INTEGER PRIMARY KEY AUTOINCREMENT,
+        "username" TEXT NOT NULL UNIQUE,
+        "password" TEXT NOT NULL
+    );`
+
+	statement, err := db.Prepare(users)
+
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+	statement.Exec()
+}
+
+func registerHandler(w http.ResponseWriter, r *http.Request) {
+	//fmt.Fprintf(w, "Kayıt Olma Sayfası")
+
+	if r.Method == http.MethodPost {
+		username := r.FormValue("username")
+		password := r.FormValue("password")
+		fmt.Println("Kullanıcı Adı: ", username)
+		fmt.Println("Şifre: ", password)
+		_, err := db.Exec("INSERT INTO users(username,password) VALUES (?, ?)", username, password)
+		if err != nil {
+			http.Error(w, "Kayıt Başarısız: "+err.Error(), http.StatusInternalServerError)
+		}
+
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+
+	if err := templates.ExecuteTemplate(w, "register.html", nil); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+
+	}
+}
+
+func loginHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		username := r.FormValue("username")
+		password := r.FormValue("password")
+		var storedPassword string
+
+		err := db.QueryRow("SELECT password FROM users WHERE username = ?", username).Scan(&storedPassword)
+
+		if err != nil {
+			http.Error(w, "Giriş Başarısız: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if password == storedPassword {
+			fmt.Fprintf(w, "Giriş Başarılı! Hoşgeldiniz, %s", username)
+		} else {
+			http.Error(w, "Geçersiz kullanıcı adı veya şifre", http.StatusUnauthorized)
+		}
+		return
+	}
+	if err := templates.ExecuteTemplate(w, "login.html", nil); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+
+	}
+}
+

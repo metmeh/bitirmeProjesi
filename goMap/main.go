@@ -11,13 +11,13 @@ import (
 )
 
 func main() {
-	//Kullanıcıdan ip aralığı alma
+	// Kullanıcıdan ip aralığı alma
 	fmt.Print("Taranacak IP Aralığını Giriniz/(Başlangıç ve Bitiş IP Aralığını '-' ile Ayırınız): ")
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Scan()
 	ipRange := scanner.Text()
 
-	//IP aralığını '-' ile ayırma
+	// IP aralığını '-' ile ayırma
 	rangeParts := strings.Split(ipRange, "-")
 	if len(rangeParts) != 2 {
 		fmt.Println("Geçersiz IP aralığı!")
@@ -28,13 +28,10 @@ func main() {
 	endIP := rangeParts[1]
 
 	fmt.Printf("Başlangıç IP: %s\nBitiş IP: %s\n", startIP, endIP)
-	/*
-		startIP := "192.168.1.1"
-		endIP := "192.168.1.10"*/
 
-	//ip aralığındaki tüm ip adresleri tara
+	// IP aralığındaki tüm ip adreslerini tara
 	var wg sync.WaitGroup
-	for ip := startIP; ip <= endIP; ip = getNextIP(ip) {
+	for ip := startIP; compareIPs(ip, endIP) <= 0; ip = getNextIP(ip) {
 		wg.Add(1)
 		go func(ip string) {
 			defer wg.Done()
@@ -48,13 +45,38 @@ func main() {
 
 func getNextIP(ip string) string {
 	oktet := strings.Split(ip, ".")
-	sonOktet, _ := strconv.Atoi(oktet[3])
-	sonOktet++
-	oktet[3] = strconv.Itoa(sonOktet)
+	for i := len(oktet) - 1; i >= 0; i-- {
+		val, _ := strconv.Atoi(oktet[i])
+		if val < 255 {
+			oktet[i] = strconv.Itoa(val + 1)
+			break
+		} else {
+			oktet[i] = "0"
+		}
+	}
 	return strings.Join(oktet, ".")
 }
 
+func compareIPs(ip1, ip2 string) int {
+	oktet1 := strings.Split(ip1, ".")
+	oktet2 := strings.Split(ip2, ".")
+	for i := 0; i < len(oktet1); i++ {
+		val1, _ := strconv.Atoi(oktet1[i])
+		val2, _ := strconv.Atoi(oktet2[i])
+		if val1 < val2 {
+			return -1
+		} else if val1 > val2 {
+			return 1
+		}
+	}
+	return 0
+}
+
 func isIPActive(ip string) bool {
-	_, err := net.Dial("ip4:icmp", ip)
-	return err == nil
+	conn, err := net.Dial("tcp", ip+":80")
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
 }
