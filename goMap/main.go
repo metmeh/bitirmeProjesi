@@ -1,82 +1,71 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"net"
-	"os"
-	"strconv"
-	"strings"
 	"sync"
+	"time"
 )
 
-func main() {
-	// Kullanıcıdan ip aralığı alma
-	fmt.Print("Taranacak IP Aralığını Giriniz/(Başlangıç ve Bitiş IP Aralığını '-' ile Ayırınız): ")
-	scanner := bufio.NewScanner(os.Stdin)
-	scanner.Scan()
-	ipRange := scanner.Text()
+// Yaygın kullanılan portlar ve servisler
+var portServices = map[int]string{
+	21:   "FTP",
+	22:   "SSH",
+	23:   "Telnet",
+	25:   "SMTP",
+	53:   "DNS",
+	80:   "HTTP",
+	110:  "POP3",
+	143:  "IMAP",
+	443:  "HTTPS",
+	3306: "MySQL",
+	3389: "RDP",
+	5900: "VNC",
+	2221: "FTP",
+}
 
-	// IP aralığını '-' ile ayırma
-	rangeParts := strings.Split(ipRange, "-")
-	if len(rangeParts) != 2 {
-		fmt.Println("Geçersiz IP aralığı!")
+func scanPort(ip string, port int, wg *sync.WaitGroup, results chan<- string) {
+	defer wg.Done()
+	address := fmt.Sprintf("%s:%d", ip, port)
+	conn, err := net.DialTimeout("tcp", address, 1*time.Second)
+	if err != nil {
+		// Port kapalı veya bağlantı kurulamadı
 		return
 	}
-
-	startIP := rangeParts[0]
-	endIP := rangeParts[1]
-
-	fmt.Printf("Başlangıç IP: %s\nBitiş IP: %s\n", startIP, endIP)
-
-	// IP aralığındaki tüm ip adreslerini tara
-	var wg sync.WaitGroup
-	for ip := startIP; compareIPs(ip, endIP) <= 0; ip = getNextIP(ip) {
-		wg.Add(1)
-		go func(ip string) {
-			defer wg.Done()
-			if isIPActive(ip) {
-				fmt.Printf("Aktif IP: %s\n", ip)
-			}
-		}(ip)
-	}
-	wg.Wait()
-}
-
-func getNextIP(ip string) string {
-	oktet := strings.Split(ip, ".")
-	for i := len(oktet) - 1; i >= 0; i-- {
-		val, _ := strconv.Atoi(oktet[i])
-		if val < 255 {
-			oktet[i] = strconv.Itoa(val + 1)
-			break
-		} else {
-			oktet[i] = "0"
-		}
-	}
-	return strings.Join(oktet, ".")
-}
-
-func compareIPs(ip1, ip2 string) int {
-	oktet1 := strings.Split(ip1, ".")
-	oktet2 := strings.Split(ip2, ".")
-	for i := 0; i < len(oktet1); i++ {
-		val1, _ := strconv.Atoi(oktet1[i])
-		val2, _ := strconv.Atoi(oktet2[i])
-		if val1 < val2 {
-			return -1
-		} else if val1 > val2 {
-			return 1
-		}
-	}
-	return 0
-}
-
-func isIPActive(ip string) bool {
-	conn, err := net.Dial("tcp", ip+":80")
-	if err != nil {
-		return false
-	}
 	conn.Close()
-	return true
+
+	service, exists := portServices[port]
+	if exists {
+		results <- fmt.Sprintf("Port %d (%s) is open", port, service)
+	} else {
+		results <- fmt.Sprintf("Port %d is open", port)
+	}
+}
+
+func main() {
+	var ip string
+	fmt.Print("Taranacak IP adresini girin: ")
+	fmt.Scanln(&ip)
+
+	startPort := 1
+	endPort := 5000
+	var wg sync.WaitGroup
+	results := make(chan string)
+
+	// Tarama sonuçlarını toplamak için bir goroutine başlat
+	go func() {
+		for result := range results {
+			fmt.Println(result)
+		}
+	}()
+
+	// Portları taramak için goroutine'ler başlat
+	for port := startPort; port <= endPort; port++ {
+		wg.Add(1)
+		go scanPort(ip, port, &wg, results)
+	}
+
+	// Tüm goroutine'lerin bitmesini bekle
+	wg.Wait()
+	close(results)
 }
